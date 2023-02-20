@@ -9,7 +9,7 @@ from sklearn.multiclass import OneVsRestClassifier
 from sklearn.multioutput import ClassifierChain, MultiOutputClassifier
 
 from setfit import SetFitHead, SetFitModel
-from setfit.modeling import MODEL_HEAD_NAME, sentence_pairs_generation, sentence_pairs_generation_multilabel
+from setfit.modeling import MODEL_HEAD_NAME, sentence_pairs_generation, MultiLabelSentencePairDataset
 
 
 def test_sentence_pairs_generation():
@@ -28,18 +28,15 @@ def test_sentence_pairs_generation():
 
 
 def test_sentence_pairs_generation_multilabel():
+    np.random.seed(1)
     sentences = np.array(["sent 1", "sent 2", "sent 3"])
     labels = np.array([[1, 0, 0, 0], [0, 1, 0, 0], [0, 0, 1, 0]])
+    dataset = MultiLabelSentencePairDataset(sentences, labels, 2)
 
-    n_iterations = 2
-
-    pairs = []
-    for _ in range(n_iterations):
-        pairs.extend(sentence_pairs_generation_multilabel(sentences, labels))
-
-    assert len(pairs) == 12
-    assert pairs[0].texts == ["sent 1", "sent 1"]
-    assert pairs[0].label == 1.0
+    assert len(dataset) == 12
+    dataset_items = list(dataset)
+    assert dataset_items[0].texts == ["sent 1", "sent 2"]
+    assert dataset_items[0].label == 0.0
 
 
 def test_setfit_model_body():

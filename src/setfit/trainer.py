@@ -1,5 +1,5 @@
 import math
-from typing import TYPE_CHECKING, Any, Callable, Dict, Optional, Union
+from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Union
 
 import evaluate
 import numpy as np
@@ -12,7 +12,7 @@ from transformers.trainer_utils import HPSearchBackend, default_compute_objectiv
 
 from . import logging
 from .integrations import default_hp_search_backend, is_optuna_available, run_hp_search_optuna
-from .modeling import SupConLoss, sentence_pairs_generation, SentencePairDataset
+from .modeling import SupConLoss, sentence_pairs_generation, MultiLabelSentencePairDataset
 from .utils import BestRun, default_hp_space_optuna
 
 
@@ -265,6 +265,8 @@ class SetFitTrainer:
         body_learning_rate: Optional[float] = None,
         l2_weight: Optional[float] = None,
         trial: Union["optuna.Trial", Dict[str, Any]] = None,
+        custom_dataloader: Optional[DataLoader] = None,
+        instance_weights: Optional[List[float]] = None,
     ):
         """
         Main training entry point.
@@ -310,8 +312,9 @@ class SetFitTrainer:
         batch_size = batch_size or self.batch_size
         learning_rate = learning_rate or self.learning_rate
         is_differentiable_head = isinstance(self.model.model_head, torch.nn.Module)  # If False, assume using sklearn
-
-        if not is_differentiable_head or self._freeze:
+        if custom_dataloader:
+            train_dataloader = custom_dataloader
+        elif not is_differentiable_head or self._freeze:
             # sentence-transformers adaptation
             if self.loss_class in [
                 losses.BatchAllTripletLoss,
@@ -339,19 +342,17 @@ class SetFitTrainer:
                         distance_metric=self.distance_metric,
                         margin=self.margin,
                     )
-
-                train_steps = len(train_dataloader) * self.num_epochs
             else:
                 if self.model.multi_target_strategy is None:
                     train_examples = []
                     for _ in range(self.num_iterations):
                         train_examples.extend(sentence_pairs_generation(np.array(x_train), np.array(y_train)))
-                        train_dataloader = DataLoader(train_examples, shuffle=True, batch_size=batch_size)
+                    train_dataloader = DataLoader(train_examples, shuffle=True, batch_size=batch_size)
                 else:
-                    train_examples = SentencePairDataset(np.array(x_train), np.array(y_train), self.num_iterations)
+                    train_examples = MultiLabelSentencePairDataset(np.array(x_train), np.array(y_train), self.num_iterations)
                     train_dataloader = DataLoader(train_examples, batch_size=batch_size)
                 train_loss = self.loss_class(self.model.model_body)
-                train_steps = len(train_dataloader) * num_epochs
+            train_steps = len(train_dataloader) * num_epochs
 
             logger.info("***** Running training *****")
             logger.info(f"  Num examples = {len(train_dataloader)}")
@@ -380,6 +381,7 @@ class SetFitTrainer:
                 learning_rate=learning_rate,
                 body_learning_rate=body_learning_rate,
                 l2_weight=l2_weight,
+                instance_weights=instance_weights,
                 show_progress_bar=True,
             )
 

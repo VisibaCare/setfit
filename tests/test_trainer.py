@@ -60,6 +60,15 @@ class SetFitTrainerTest(TestCase):
         metrics = trainer.evaluate()
         self.assertEqual(metrics["accuracy"], 1.0)
 
+    def test_trainer_works_with_instance_weights(self):
+        dataset = Dataset.from_dict({"text": ["a", "b", "c"], "label": [0, 1, 2], "extra_column": ["d", "e", "f"]})
+        trainer = SetFitTrainer(
+            model=self.model, train_dataset=dataset, eval_dataset=dataset, num_iterations=self.num_iterations,
+        )
+        trainer.train(instance_weights=[1, 2, 3])
+        metrics = trainer.evaluate()
+        self.assertEqual(metrics["accuracy"], 1.0)
+
     def test_trainer_raises_error_with_missing_label(self):
         dataset = Dataset.from_dict({"text": ["a", "b", "c"], "extra_column": ["d", "e", "f"]})
         trainer = SetFitTrainer(

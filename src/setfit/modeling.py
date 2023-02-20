@@ -162,7 +162,9 @@ class SetFitHead(models.Dense):
             out = np.argmax(probs, dim=-1)
         return out
 
-    def get_loss_fn(self):
+    def get_loss_fn(self, with_instance_weights: Optional[bool] = False):
+        if with_instance_weights:
+            return InstanceWeightedCrossEntropy()
         if self.out_features == 1 or self.multitarget:  # if sigmoid output
             return torch.nn.BCELoss()
         else:
@@ -228,6 +230,7 @@ class SetFitModel(PyTorchModelHubMixin):
         learning_rate: Optional[float] = None,
         body_learning_rate: Optional[float] = None,
         l2_weight: Optional[float] = None,
+        instance_weights: Optional[List[float]] = None,
         show_progress_bar: Optional[bool] = None,
     ) -> None:
         if isinstance(self.model_head, nn.Module):  # train with pyTorch
@@ -236,7 +239,7 @@ class SetFitModel(PyTorchModelHubMixin):
             self.model_head.train()
 
             dataloader = self._prepare_dataloader(x_train, y_train, batch_size)
-            criterion = self.model_head.get_loss_fn()
+            criterion = self.model_head.get_loss_fn(bool(instance_weights))
             optimizer = self._prepare_optimizer(learning_rate, body_learning_rate, l2_weight)
             scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=5, gamma=0.5)
             for epoch_idx in tqdm(range(num_epochs), desc="Epoch", disable=not show_progress_bar):
@@ -256,7 +259,10 @@ class SetFitModel(PyTorchModelHubMixin):
                     outputs = self.model_head(outputs)
                     predictions = outputs["prediction"]
 
-                    loss = criterion(predictions, labels)
+                    if instance_weights:
+                        loss = criterion(predictions, labels, torch.tensor(instance_weights))
+                    else:
+                       loss = criterion(predictions, labels)
                     loss.backward()
                     optimizer.step()
 
@@ -600,7 +606,7 @@ class SKLearnWrapper:
         self.clf = joblib.load(f"{path}/setfit_head.pkl")
 
 
-class SentencePairDataset(IterableDataset):
+class MultiLabelSentencePairDataset(IterableDataset):
     def __init__(self, x_train, y_train, n_iterations, metric="binary"):
         super().__init__()
         self.x_train = np.array(x_train)
@@ -666,3 +672,8 @@ def binary_label(labels1, labels2):
     a = set(np.where(labels1 == 1)[0])
     b = set(np.where(labels2 == 1)[0])
     return float(bool(a & b))
+
+
+class InstanceWeightedCrossEntropy(torch.nn.CrossEntropyLoss):
+    def forward(self, input: torch.Tensor, target: torch.Tensor, instance_weights: torch.Tensor) -> torch.Tensor:
+        return super().forward(input, target) * instance_weights
