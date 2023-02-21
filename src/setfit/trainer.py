@@ -312,9 +312,7 @@ class SetFitTrainer:
         batch_size = batch_size or self.batch_size
         learning_rate = learning_rate or self.learning_rate
         is_differentiable_head = isinstance(self.model.model_head, torch.nn.Module)  # If False, assume using sklearn
-        if custom_dataloader:
-            train_dataloader = custom_dataloader
-        elif not is_differentiable_head or self._freeze:
+        if not is_differentiable_head or self._freeze:
             # sentence-transformers adaptation
             if self.loss_class in [
                 losses.BatchAllTripletLoss,
@@ -343,7 +341,9 @@ class SetFitTrainer:
                         margin=self.margin,
                     )
             else:
-                if self.model.multi_target_strategy is None:
+                if custom_dataloader:
+                    train_dataloader = custom_dataloader
+                elif self.model.multi_target_strategy is None:
                     train_examples = []
                     for _ in range(self.num_iterations):
                         train_examples.extend(sentence_pairs_generation(np.array(x_train), np.array(y_train)))
