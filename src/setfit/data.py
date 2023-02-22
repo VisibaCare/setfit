@@ -1,4 +1,4 @@
-from typing import TYPE_CHECKING, Dict, List, Tuple, Union
+from typing import TYPE_CHECKING, Dict, List, Optional, Tuple, Union
 
 import pandas as pd
 import torch
@@ -238,6 +238,7 @@ class SetFitDataset(TorchDataset):
         self,
         x: List[str],
         y: Union[List[int], List[List[int]]],
+        weights: List[float],
         tokenizer: "PreTrainedTokenizerBase",
         max_length: int = 32,
     ) -> None:
@@ -245,6 +246,7 @@ class SetFitDataset(TorchDataset):
 
         self.x = x
         self.y = y
+        self.weights = weights
         self.tokenizer = tokenizer
         self.max_length = max_length
 
@@ -261,8 +263,9 @@ class SetFitDataset(TorchDataset):
             return_token_type_ids=True,
         )
         label = self.y[idx]
+        weight = self.weights[idx]
 
-        return feature, label
+        return feature, label, weight
 
     @staticmethod
     def collate_fn(batch):
@@ -272,14 +275,17 @@ class SetFitDataset(TorchDataset):
             "token_type_ids": [],
         }
         labels = []
-        for feature, label in batch:
+        weights = []
+        for feature, label, weight in batch:
             features["input_ids"].append(feature["input_ids"])
             features["attention_mask"].append(feature["attention_mask"])
             features["token_type_ids"].append(feature["token_type_ids"])
             labels.append(label)
+            weights.append(weight)
 
         # convert to tensors
         features = {k: torch.Tensor(v).int() for k, v in features.items()}
         labels = torch.Tensor(labels).long()
+        weights = torch.Tensor(weights).float()
 
-        return features, labels
+        return features, labels, weights

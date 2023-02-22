@@ -114,14 +114,15 @@ class SetFitModelDifferentiableHeadTest(TestCase):
         device = model.model_head.device
 
         batch = next(iter(dataloader))
-        features, labels = batch
+        features, labels, weights = batch
         features = {k: v.to(device) for k, v in features.items()}
         labels = labels.to(device)
+        weights = weights.to(device)
         optimizer.zero_grad()
 
         outputs = model.model_body(features)
         outputs = model.model_head(outputs)
-        loss = criterion(outputs["prediction"], labels)
+        loss = criterion(outputs["prediction"], labels, weights)
         loss.backward()
         optimizer.step()
 
@@ -204,7 +205,7 @@ def test_setfithead_multitarget_from_pretrained():
     )
     assert isinstance(model.model_head, SetFitHead)
     assert model.model_head.multitarget
-    assert isinstance(model.model_head.get_loss_fn(), torch.nn.BCELoss)
+    assert isinstance(model.model_head.get_loss_fn().loss, torch.nn.BCELoss)
 
     y_pred = model.predict("Test text")
     assert len(y_pred) == 5

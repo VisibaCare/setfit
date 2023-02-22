@@ -3,7 +3,7 @@ import os
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Dict, List, Optional, Union
-from functools import cache
+from functools import lru_cache
 
 
 # Google Colab runs on Python 3.7, so we need this to be compatible
@@ -162,13 +162,12 @@ class SetFitHead(models.Dense):
             out = np.argmax(probs, dim=-1)
         return out
 
-    def get_loss_fn(self, with_instance_weights: Optional[bool] = False):
-        if with_instance_weights:
-            return InstanceWeightedCrossEntropy()
+    def get_loss_fn(self):
         if self.out_features == 1 or self.multitarget:  # if sigmoid output
-            return torch.nn.BCELoss()
+            loss = torch.nn.BCELoss(reduction="none")
         else:
-            return torch.nn.CrossEntropyLoss()
+            loss = torch.nn.CrossEntropyLoss(reduction="none")
+        return WeightedLoss(loss)
 
     @property
     def device(self) -> torch.device:
@@ -238,18 +237,19 @@ class SetFitModel(PyTorchModelHubMixin):
             self.model_body.train()
             self.model_head.train()
 
-            dataloader = self._prepare_dataloader(x_train, y_train, batch_size)
-            criterion = self.model_head.get_loss_fn(bool(instance_weights))
+            dataloader = self._prepare_dataloader(x_train, y_train, batch_size, instance_weights)
+            criterion = self.model_head.get_loss_fn()
             optimizer = self._prepare_optimizer(learning_rate, body_learning_rate, l2_weight)
             scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=5, gamma=0.5)
             for epoch_idx in tqdm(range(num_epochs), desc="Epoch", disable=not show_progress_bar):
                 for batch in dataloader:
-                    features, labels = batch
+                    features, labels, weights = batch
                     optimizer.zero_grad()
 
                     # to model's device
                     features = {k: v.to(device) for k, v in features.items()}
                     labels = labels.to(device)
+                    weights = weights.to(device)
                     if self.model_head.multitarget:
                         labels = labels.float()
 
@@ -259,10 +259,7 @@ class SetFitModel(PyTorchModelHubMixin):
                     outputs = self.model_head(outputs)
                     predictions = outputs["prediction"]
 
-                    if instance_weights:
-                        loss = criterion(predictions, labels, torch.tensor(instance_weights))
-                    else:
-                       loss = criterion(predictions, labels)
+                    loss = criterion(predictions, labels, weights)
                     loss.backward()
                     optimizer.step()
 
@@ -273,11 +270,13 @@ class SetFitModel(PyTorchModelHubMixin):
             self.model_head.fit(embeddings, y_train)
 
     def _prepare_dataloader(
-        self, x_train: List[str], y_train: List[int], batch_size: int, shuffle: bool = True
+        self, x_train: List[str], y_train: List[int], batch_size: int, weights: Optional[List[float]] = None, shuffle: bool = True
     ) -> DataLoader:
+        weights = weights if weights is not None else len(x_train) * [1]
         dataset = SetFitDataset(
             x_train,
             y_train,
+            weights,
             tokenizer=self.model_body.tokenizer,
             max_length=self.model_body.get_max_seq_length(),
         )
@@ -650,7 +649,7 @@ class MultiLabelSentencePairDataset(IterableDataset):
                     ),
                 )
 
-    @cache
+    @lru_cache
     def __len__(self):
         length = 0
         for first_idx, _ in enumerate(self.x_train):
@@ -674,6 +673,10 @@ def binary_label(labels1, labels2):
     return float(bool(a & b))
 
 
-class InstanceWeightedCrossEntropy(torch.nn.CrossEntropyLoss):
-    def forward(self, input: torch.Tensor, target: torch.Tensor, instance_weights: torch.Tensor) -> torch.Tensor:
-        return super().forward(input, target) * instance_weights
+class WeightedLoss(torch.nn.Module):
+    def __init__(self, loss):
+        super().__init__()
+        self.loss = loss
+
+    def forward(self, input: torch.Tensor, target: torch.Tensor, weight: torch.Tensor) -> torch.Tensor:
+        return torch.mean(self.loss.forward(input, target) * weight.reshape((-1,1)))
