@@ -680,6 +680,7 @@ class SupConLoss(nn.Module):
 
 def sentence_pairs_generation(sentences, labels):
     pairs = []
+    labels = np.array(labels)
     num_classes = np.unique(labels)
     label_to_idx = {x: i for i, x in enumerate(num_classes)}
     positive_idxs = [np.where(labels == i)[0] for i in num_classes]
