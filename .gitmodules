@@ -1,0 +1,3 @@
+[submodule "scripts/tfew/t-few"]
+    path = scripts/tfew/t-few
+    url = https://github.com/SetFit/t-few.git
